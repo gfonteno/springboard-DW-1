@@ -1,7 +1,7 @@
-#Titanic Exercise
+# Titanic Exercise
 
-#Download / Install the titanic data set if necesary
+(1) Download / Install the titanic data set if necesary
 
-#Tidy data as required
+(2) Tidy data as required
 
-#Execute
+(3) Execute
