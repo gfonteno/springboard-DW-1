@@ -1,0 +1,116 @@
+---
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+
+## Capstone Project Proposal
+###### *Introduction to Data Science by Springboard*
+### Network Data Flow analysis
+##### By Gabriel Fontenot
+***
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Cleaning
+
+# 0: Reference required Libraries in RStudio
+```{r library}
+
+library(dplyr)
+library(tidyr)
+library(stringr)
+library("rjson")
+```
+
+# 1: Load the 'flow' source data set into RStudio
+
+```{r load_flows}
+
+dat = read.csv("smallFlows_clean.csv", header = TRUE)
+```
+
+# 2: Counting
+
+Count the number of rows in the data set.
+```{r count_rows}
+count <- nrow(dat)
+print(count)
+```
+
+Count the number of rows in the data set that have a platform of "CentOS-6.5"
+
+```{r count_rows_platform}
+
+count_filter <- nrow(filter(dat, platform == "CentOS-6.5"))
+print(count_filter)
+```
+
+# 3: Trends (high, low, increase, decrease, anomalies)
+
+```{r trends_anomalies}
+
+a <- dat %>% group_by(platform) %>% tally
+ggplot(a, aes(x=platform, y=n,)) + 
+  geom_point(na.rm=TRUE, aes(colour = platform))
+```
+
+# 4: Bar plot or a histogram
+
+```{r bar_plot_histogram}
+
+ggplot(dat,aes(x=Length, group=platform,fill=platform)) +
+  geom_histogram(na.rm=TRUE, position="dodge", binwidth=500) + 
+  theme_bw()
+```
+
+# 5: Compaing Quantities
+
+```{r compare_quantities}
+
+ggplot(dat, aes(x=Time, colour=Protocol, fill=Protocol)) + 
+  geom_density(alpha = 0.1) +
+  xlim(235, 240)
+```
+
+# 6: Scatterplot
+
+```{r scatterplot}
+
+ggplot(dat, aes(x = Length, y = platform, colour = cond)) + 
+  geom_point(na.rm=TRUE, aes(colour = platform)) + 
+  theme(legend.position="none")
+```
+
+# 7: Time Series Plot
+
+```{r time_series_plot}
+
+# created_at
+# last_config_fetch_at
+
+ggplot(dat, aes(x=as.POSIXct(created_at, origin="1970-01-01"), y=platform,)) + 
+  geom_point(na.rm=TRUE, aes(colour = platform)) + 
+  theme(legend.position="none")
+
+number_ticks <- function(n) {function(limits) pretty(limits, n)}
+
+ggplot(dat, aes(x=Time, y=platform)) + 
+  geom_point(na.rm=TRUE, aes(colour = platform)) +
+  scale_x_continuous(breaks=number_ticks(20)) + 
+  theme(legend.position="none")
+```
+
+# 8: MISC
+
+```{r misc}
+
+ggplot(dat, aes(x=Time, y=platform, color=platform)) +
+  geom_boxplot(na.rm=TRUE)
+```
+
+# 9: Submit the project on Github
