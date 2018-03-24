@@ -1,0 +1,340 @@
+---
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+---
+
+## Capstone Project Proposal
+###### *Introduction to flow Data Science by Springboard*
+### Network Data Flow analysis
+##### By Gabriel Fontenot
+***
+
+```{r setup, include=FALSE}
+# knitr::opts_chunk$set(error = TRUE)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+### The problem statement
+
+Network engineers have been collecting flow data for decades regarding performance and behavior. The flow data sets collected include but not limited to device configurations, syslog (device messaging), and device snmptraps (fault management). Engineers and operations have for the most part used the collected flow data to assist with various troubleshooting and design exercises. 
+
+Using the statistical, proablitity and machine learning modules, the idea is to enhance the overall flow data analization experience and provide a conceise and targeted approach to understanding network and application behavior.
+
+The host OS (distribution) is a constant and necesary part of the overall application structure. The intent of the analysis below is to understand how the OS is utilized by various components of the network to influence application behavior. This will include understanding the volument of traffic per OS and how each OS uses the network resourses.
+
+The results inferred can further network engineers and architects understanding of applications and be considered when looking at network designs.
+
+### About the flow/host data set
+
+The flow data sets subject to flow data analysis include a packet capture describing the overall network behavior (who is talking to who) and a description of the host communicating on the network during the specified time interval. The network flow data includes source and destination ip addresses along with host descriptions to assist in identifying traffic patterns and anomolies.
+
+The intended flow data set has the following structures and descriptions.
+
+####Flows
+
+ 1)  host_name                 : Factor : the host name of the guest OS
+ 2)  last_software_update_at   : int    : the last time the host agent was updated
+ 3)  data_plane_disabled       : logic  : the status of the data plane forwarding
+ 4)  platform                  : Factor : the guest OS host distribution
+ 5)  agent_type                : Factor : the current agent deployed on the guest os
+ 6)  current_sw_version        : Factor : the current agent version as installed on the host
+ 7)  enable_pid_lookup         : logic  : the current status of the PID lookup functionality
+ 8)  last_config_fetch_at      : int    : the timeframe the guest OS last checked in
+ 
+####Sensors
+
+ 1) start_timestamp           : num    : the timeframe the flow started
+ 2) src_port                   : int    : the source port for the selected flow
+ 3) rev_pkts                   : int    : the packet count for the reverse flows
+ 4) rev_bytes                  : int    : the byte count for the reverse flows
+ 5) proto                      : Factor : the IP protocol used for the current flow
+ 6) src_address                : Factor : source IP ADDRESS of the host that initiated the flow
+ 7) timestamp                  : Factor : the timestamp the flow was collected
+ 8) fwd_bytes                  : int    : the byte count for the forward direction of the flow
+ 9) src_hostname               : Factor : the host name of the source host in the flow
+ 10) dst_address               : Factor : destination IP ADDRESS of the host of which the source is communicating with
+ 11) src_is_internal           : Factor : the current state of the host relative to is location
+ 12) dst_port                  : int    : the destination port for teh selected flow
+ 13) srtt_usec                 : int    : the srtt latency associated with the current flow
+ 14) vrf_id                    : int    : the vrf id for the current flow
+ 15) vrf_name                  : Factor : the vrf name for the current flow
+ 16) fwd_pkts                  : int    : the packet count for the forward direction of the flow
+ 17) server_app_latency_usec   : int    : the application latency as derived from the application agent
+ 18) total_network_latency_usec: int    : the calculated network latency
+ 19) total_pkts                : int    : the total fwd and rev packet count
+ 20) platform_windowns         : logic  : the state of the platform, windows
+ 21) total_bytes               : int    : the toal fwd and rev byte count
+
+# Evaluating the flow data
+
+### RStudio Libraries
+
+The libraries listed below are utilized to provide functionality required to parse, analyze and display the appropriate flow data sets.
+
+```{r library, include=TRUE, message=FALSE}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(rjson)
+library(lubridate)
+library(RColorBrewer)
+library(knitr)
+library(caTools)
+```
+
+### Loading the data sets
+
+The 'csv' files representing the flow analysis are loaded into the variable flowData and SensorData. The data is comprised of a network capture of multiple host communicating on the network during the define collection period. 
+
+```{r load_flows, include=FALSE}
+fileName <- "FlowData.csv"
+flowData = read.csv(fileName, header = TRUE)
+
+fileName <- "SensorData.csv"
+sensorData = read.csv(fileName, header = TRUE)
+```
+
+### Cleaning the flow/host data sets
+
+The prepare the data for analysis, the data must first be normalized. The multiple step process includes the following steps.
+
+1) Remove ROWs with non IPv4 addresses in Source and Destination
+
+  The collected data set contains IPv4 and IPv6 addresses. For the purpuse of this exercise, all IPv6 addresses will be removed.
+
+```{r retain_ipV4, include=FALSE}
+flowData <- flowData %>% 
+  filter(str_detect(src_address, ".*?(\\d+\\.\\d+\\.\\d+\\.\\d+).*?")) %>%
+  filter(str_detect(dst_address, ".*?(\\d+\\.\\d+\\.\\d+\\.\\d+).*?"))
+```
+
+2) Remove ROWs with no (missing) destination HOSTNAME
+
+  The collected data set contains hosts without a defined hostname. These flows will be identified and removed from the analysis   as they are flows that do not contain agents.
+
+```{r remove_empty_hostnames, include=FALSE}
+flowData <- with(flowData, flowData[!(dst_hostname == "" | is.na(dst_hostname)), ])
+```
+
+3) Merge data sets, flows and hosts
+
+  To getter a holistic view of the flows, the flow data and the host data will be combined. This effort will allow for        additional oppurtunities to corelate flow and host data.
+
+```{r merge_data_sets, include=FALSE}
+data <- merge(sensorData, flowData, by.x=c('host_name'), by.y=c('dst_hostname'))
+```
+
+4) Add new column Total Packet, total_pkts
+
+  To provide summarization for the packet count, a sumamry field of the fwd and rev packets will be added.
+
+```{r add_total_packet, include=FALSE}
+data$total_pkts <- data$rev_pkts + data$fwd_pkts
+```
+
+5) Add new column Total Bytes, total_bytes
+
+  To provide summarization for the byte count, a sumamry field of the fwd and rev bytes will be added.
+
+```{r add_total_bytes, include=FALSE}
+data$total_bytes <- data$rev_bytes + data$fwd_bytes
+```
+
+6) Add new column Platform Type, platform_type
+
+```{r add_windows, include=FALSE}
+data <- data %>% 
+  mutate(platform_type = ifelse(str_detect(platform, ".*?(^MS.+).*?"), 0, 1))
+```
+
+7) Add new column Time in Mins, time_min
+
+```{r add_time_min, include=FALSE}
+#data <- data %>% mutate(time_min = str_extract(data$timestamp, pattern = "(:.*:)"))
+data <- data %>% mutate(time_min = format(as.POSIXct(strptime(data$timestamp,"%Y-%m-%dT%H:%M:%S",tz="")) ,format = "%I:%M"))
+```
+
+8) Filter the data set if needed to represent a single application or set of hosts
+
+```{r filter_data_set, include=FALSE}
+app_list <- c('10.95.34.119','10.95.34.120','10.95.34.121','10.95.34.122','10.95.34.123','10.95.34.124','10.95.34.126','10.95.34.142')
+```
+
+9) Create a cleaned CSV file representing the data to be analyzed.
+
+  The cleaned data will be saved into a CSV file callsed flowDataSensor_clean.
+
+```{r create_csv, include=FALSE}
+write.csv(data, file = "flowDataSensor_clean.csv")
+```
+
+10) List object variables
+
+```{r object_variables, include=FALSE}
+
+number_ticks <- function(n) {function(limits) pretty(limits, n)}
+
+colourCount = length(unique(data$platform))
+getPalette = colorRampPalette(brewer.pal(9, "Set1"))
+
+```
+
+### Counting records and variables
+
+Using R methods and functionality, determine various flow data set counts. Counting various aspects of your flow data set can prepare you for dealing with the content during analysis.
+
+* Count the number of rows and columns in the flow data set, `r fileName`.
+
+```{r count_rows, include=FALSE}
+row_count <- nrow(data)
+col_count <- ncol(data)
+sprintf("There are a total of %s ROWs and %s COLUMNs in the flow data set.", row_count, col_count)
+```
+
+* Count the number of rows in the flow data set that have a platform of "CentOS-6.5"
+
+```{r count_rows_platform, include=FALSE}
+count_filter <- nrow(filter(data, platform == "CentOS-6.5"))
+
+sprintf("There are a total of %s ROWs in the flow data se that contain the name 'CentOS-6.5'.", count_filter)
+```
+
+### Understanding the data set as related to host OS. 
+
+Using the combined data sets, we can get a better understanding of the guest OS distribution accross the collected flows. This first step in the overall data analysis provides insight into the overall distribution. 
+
+```{r trends_anomalies, include=TRUE, message=FALSE, fig.align='center'}
+
+a <- data %>% group_by(platform) %>% tally
+
+a %>% ggplot() + 
+  geom_point(aes(x=platform, y=n, color = platform)) +
+  scale_y_continuous(breaks=number_ticks(10)) +
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) +
+  xlab("Platform") + 
+  ylab("Flow Counts") +
+  ggtitle(paste("Flow Records by OS Type"))
+
+#data$timestamp <- factor(data$timestamp, levels=unique(data$timestamp))
+
+```
+
+The plot above shows CentOS-6.5 as the most popular OS utilized during the provided flow capture. The source of the traffic, host OS, is not evenly distributed accross OS's.
+
+### Services provided per OS
+
+As we explore the flow data set further, we can further understand the services provided by the guest OS. This may be an indication of the guest OS (application) that is the most utlized on the network during the flow capture timeframe
+
+```{r bar_plot_histogram, include=TRUE, message=FALSE, fig.align='center'}
+
+data_port <- data %>% group_by(platform) %>% summarise(n_distinct(dst_port))
+names(data_port)[2]<-paste("services_provided")
+
+data_port %>% ggplot() +
+  geom_histogram(aes(x=services_provided, fill=platform)) +
+  scale_fill_manual(values = getPalette(colourCount)) +
+  scale_x_continuous(breaks=number_ticks(7)) +
+  ylab("Total Platforms") + 
+  xlab("# of Services Provided") +
+  ggtitle(paste("Services Provided by OS Type"))
+
+```
+
+As indicated in the histogram above, we can determine that majority of the guest OS's are providing a single service. This can be interpreteded as the majority of the OSs analyzed within the flow analysis are providing serivce to a single application. 
+
+### Overall Protocol Usage
+
+As we continue to understand how applications consume overall flows within the network, it's useful to understand overall protocol distribution. The section will focus on understanding how IP protocols are implemented for the flow capture period. 
+
+```{r test, include=TRUE, message=FALSE, fig.align='center'}
+
+ggplot(data, aes(proto, total_pkts)) + 
+  geom_point(aes(colour = proto), na.rm=TRUE) + 
+  theme(legend.position="none") +
+  ylab("Total Packet Count") + 
+  xlab("IP Protocols") +
+  ggtitle(paste("Protocol Usage"))
+
+```
+
+From the results we can cleary determine that UDP is predominately utilized via the applications analysed during the capture period. The range of packets part of the UDP flows extend from 1 to 3800+ packets per flow.
+
+### Platform usage by Time
+
+By further evaluating the OS traffic over time, we can get an idea as to when the applications communicated accross the network. The network consumption can be used to understand traffic patterns and network usage.
+
+```{r time_series_plot2, include=TRUE, message=FALSE, fig.align='center'}
+
+ggplot(data, aes(x=time_min, y=platform)) + 
+  geom_point(na.rm=TRUE, aes(colour = platform)) +
+  theme(legend.position="none") +
+  ylab("Platform") + 
+  xlab("Time Interval") +
+  ggtitle(paste("Protocol Usage"))
+
+```
+
+As indicated in the table above, majority of the OS distributions commincate throught the interval of time with a couple of distriburtions only utilizing only network resources on accasion.
+
+## Conclusion
+
+TBD
+
+## MISC
+
+```{r example1, include=TRUE, message=FALSE, fig.align='center'}
+
+myTable <- table(data$platform, data$proto)
+
+kable(myTable, caption = "My First Table")
+
+myFrame <- as.data.frame((myTable))
+myFrame %>% ggplot() + 
+  geom_histogram(aes(x=Freq, fill=Var1))
+
+```
+
+```{r example2, include=TRUE, message=FALSE, fig.align='center'}
+
+#Logistic Regrsssion
+
+# Generate a TEST AND TRAINING SET
+set.seed(100)
+split = sample.split(data$platform_type, SplitRatio = 0.55)
+dataTrain = subset(data, split == TRUE)
+nrow(dataTrain)
+dataTest = subset(data, split == FALSE)
+nrow(dataTest)
+
+# Determine the total for each field of the dependent variable
+table(dataTrain$platform_type)
+
+# Update the dependent variable field to convert it to a vector
+data$platform_type <- as.factor(data$platform_type)
+
+# Logistic Regression
+platformLog = glm(platform_type ~ proto + total_pkts, data = dataTrain, family = binomial)
+summary(platformLog)
+
+# Prediction
+predictTrain = predict(platformLog, type="response")
+summary(predictTrain)
+
+# Display the mean of the Training set
+tapply(predictTrain, dataTrain$platform_type, mean)
+
+# 1 is Windows Platform
+# 0 is Linux
+
+
+#ggplot(data, aes(x=timestamp, y=rev_pkts)) + 
+#  geom_line()
+
+
+```
